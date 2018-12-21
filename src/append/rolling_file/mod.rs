@@ -80,12 +80,16 @@ impl<'de> serde::Deserialize<'de> for Policy {
 struct LogWriter {
     file: BufWriter<File>,
     len: u64,
+    use_fs_size: bool,
 }
 
 impl io::Write for LogWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.file.write(buf).map(|n| {
-            self.len += n as u64;
+            match (self.use_fs_size, self.file.get_ref().metadata().map(|meta| meta.len()).ok()) {
+                (true, Some(file_size)) => { self.len = file_size },
+                (false, Some(_)) | (_, None)  => { self.len += n as u64; }
+            }
             n
         })
     }
@@ -201,6 +205,7 @@ impl RollingFileAppender {
             *writer = Some(LogWriter {
                 file: BufWriter::with_capacity(1024, file),
                 len: len,
+                use_fs_size: true
             });
         }
 

@@ -91,9 +91,17 @@ impl FixedWindowRoller {
 }
 
 impl Roll for FixedWindowRoller {
-    fn roll(&self, file: &Path) -> Result<(), Box<Error + Sync + Send>> {
+    fn roll(&self, current_log: &Path) -> Result<(), Box<Error + Sync + Send>> {
+
+        let current_parent = current_log.parent().unwrap_or(imp::RollLockEx::temp_dir());
+        let roll_lock = imp::RollLockEx::new(current_parent);
+        match roll_lock {
+            Err(_e) => return Ok(()),
+            _ => {}
+        }
+
         if self.count == 0 {
-            return fs::remove_file(file).map_err(Into::into);
+            return fs::remove_file(current_log).map_err(Into::into);
         }
 
         let dst_0 = self.pattern.replace("{}", &self.base.to_string());
@@ -125,7 +133,7 @@ impl Roll for FixedWindowRoller {
             move_file(&src, &dst)?;
         }
 
-        self.compression.compress(file, &dst_0).map_err(Into::into)
+        self.compression.compress(current_log, &dst_0).map_err(Into::into)
     }
 }
 
@@ -236,6 +244,44 @@ impl Deserialize for FixedWindowRollerDeserializer {
         }
 
         Ok(Box::new(builder.build(&config.pattern, config.count)?))
+    }
+}
+
+#[cfg(unix)]
+mod imp {
+    use std::fs::File;
+    use std::path::PathBuf;
+    use std::io::{Error, Result};
+    use std::os::unix::io::AsRawFd;
+    use std::path::Path;
+
+    pub struct RollLockEx {
+        lock_file: File,
+    }
+
+    impl RollLockEx {
+        pub fn new(log_dir: &Path) -> Result<RollLockEx> {
+            let mut lock_path = PathBuf::new();
+            lock_path.push(log_dir);
+            lock_path.push("roll.lock");
+            let lock_file = File::create(lock_path)?;
+            let ret = unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+            if ret < 0 {
+                Err(Error::last_os_error())
+            } else {
+                Ok(RollLockEx { lock_file })
+            }
+        }
+
+        pub fn temp_dir() -> &'static Path {
+            Path::new("/tmp")
+        }
+    }
+
+    impl Drop for RollLockEx {
+        fn drop(&mut self) {
+            unsafe { libc::flock(self.lock_file.as_raw_fd(), libc::LOCK_UN) };
+        }
     }
 }
 
