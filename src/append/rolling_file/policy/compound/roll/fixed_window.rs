@@ -250,13 +250,15 @@ impl Deserialize for FixedWindowRollerDeserializer {
 #[cfg(unix)]
 mod imp {
     use std::fs::File;
+    use std::fs::remove_file;
     use std::path::PathBuf;
     use std::io::{Error, Result};
     use std::os::unix::io::AsRawFd;
     use std::path::Path;
 
     pub struct RollLockEx {
-        lock_file: File,
+        _lock_file: File,
+        lock_path: PathBuf,
     }
 
     impl RollLockEx {
@@ -264,12 +266,12 @@ mod imp {
             let mut lock_path = PathBuf::new();
             lock_path.push(log_dir);
             lock_path.push("roll.lock");
-            let lock_file = File::create(lock_path)?;
+            let lock_file = File::create(&lock_path)?;
             let ret = unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
             if ret < 0 {
                 Err(Error::last_os_error())
             } else {
-                Ok(RollLockEx { lock_file })
+                Ok(RollLockEx { _lock_file: lock_file, lock_path })
             }
         }
 
@@ -280,7 +282,7 @@ mod imp {
 
     impl Drop for RollLockEx {
         fn drop(&mut self) {
-            unsafe { libc::flock(self.lock_file.as_raw_fd(), libc::LOCK_UN) };
+            remove_file(&self.lock_path).ok();
         }
     }
 }
