@@ -93,8 +93,7 @@ impl FixedWindowRoller {
 impl Roll for FixedWindowRoller {
     fn roll(&self, current_log: &Path) -> Result<(), Box<Error + Sync + Send>> {
 
-        let current_parent = current_log.parent().unwrap_or(imp::RollLockEx::temp_dir());
-        let roll_lock = imp::RollLockEx::new(current_parent);
+        let roll_lock = imp::RollLockEx::new(current_log.parent());
         match roll_lock {
             Err(_e) => return Ok(()),
             _ => {}
@@ -262,9 +261,9 @@ mod imp {
     }
 
     impl RollLockEx {
-        pub fn new(log_dir: &Path) -> Result<RollLockEx> {
+        pub fn new(log_dir: Option<&Path>) -> Result<RollLockEx> {
             let mut lock_path = PathBuf::new();
-            lock_path.push(log_dir);
+            lock_path.push(log_dir.unwrap_or(Path::new("/tmp")));
             lock_path.push("roll.lock");
             let lock_file = File::create(&lock_path)?;
             let ret = unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
@@ -274,15 +273,26 @@ mod imp {
                 Ok(RollLockEx { _lock_file: lock_file, lock_path })
             }
         }
-
-        pub fn temp_dir() -> &'static Path {
-            Path::new("/tmp")
-        }
     }
 
     impl Drop for RollLockEx {
         fn drop(&mut self) {
             remove_file(&self.lock_path).ok();
+        }
+    }
+}
+
+#[cfg(windows)]
+mod imp {
+    use std::path::Path;
+    use std::io::Result;
+
+
+    pub struct RollLockEx {}
+
+    impl RollLockEx {
+        pub fn new(_log_dir: Option<&Path>) -> Result<RollLockEx> {
+            Ok(RollLockEx{})
         }
     }
 }
