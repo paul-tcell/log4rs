@@ -81,14 +81,19 @@ struct LogWriter {
     file: BufWriter<File>,
     len: u64,
     use_fs_size: bool,
+    check_counter: u64,
 }
 
 impl io::Write for LogWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.file.write(buf).map(|n| {
-            match (self.use_fs_size, self.file.get_ref().metadata().map(|meta| meta.len()).ok()) {
-                (true, Some(file_size)) => { self.len = file_size },
-                (false, Some(_)) | (_, None)  => { self.len += n as u64; }
+            if self.use_fs_size  && (self.check_counter % 5) == 0 {
+                match self.file.get_ref().metadata().map(|meta| meta.len()).ok() {
+                    Some(file_size) => {self.len = file_size;},
+                    None => {self.len += n as u64;}
+                }
+            } else {
+                self.len += n as u64;
             }
             n
         })
@@ -205,7 +210,8 @@ impl RollingFileAppender {
             *writer = Some(LogWriter {
                 file: BufWriter::with_capacity(1024, file),
                 len: len,
-                use_fs_size: true
+                use_fs_size: true,
+                check_counter: 0
             });
         }
 

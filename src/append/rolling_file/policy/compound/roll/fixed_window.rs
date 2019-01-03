@@ -253,8 +253,7 @@ mod imp {
     use std::fs::File;
     use std::fs::remove_file;
     use std::path::PathBuf;
-    use std::io::{Error, Result};
-    use std::os::unix::io::AsRawFd;
+    use std::io:: Result;
     use std::path::Path;
     use std::fs::OpenOptions;
 
