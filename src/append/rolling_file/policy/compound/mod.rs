@@ -104,6 +104,10 @@ impl Policy for CompoundPolicy {
     fn process(&self, log: &mut LogFile) -> Result<(), Box<Error + Sync + Send>> {
         if self.trigger.trigger(log)? {
             log.roll();
+            if !self.trigger.verify(log) {
+                //eprintln!("roll already happened pid {}", ::std::process::id());
+                return Ok(())
+            }
             self.roller.roll(log.path())?;
         }
         Ok(())

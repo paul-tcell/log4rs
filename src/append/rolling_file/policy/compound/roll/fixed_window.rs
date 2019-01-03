@@ -95,7 +95,9 @@ impl Roll for FixedWindowRoller {
 
         let roll_lock = imp::RollLockEx::new(current_log.parent());
         match roll_lock {
-            Err(_e) => return Ok(()),
+            Err(_e) => {
+                //eprintln!("lock conflict! I lost! pid {} - current log: {}", ::std::process::id(), current_log.to_string_lossy());
+                return Ok(())},
             _ => {}
         }
 
@@ -246,7 +248,7 @@ impl Deserialize for FixedWindowRollerDeserializer {
     }
 }
 
-#[cfg(all(unix, not(target_os = "solaris")))]
+#[cfg(unix)]
 mod imp {
     use std::fs::File;
     use std::fs::remove_file;
@@ -254,6 +256,7 @@ mod imp {
     use std::io::{Error, Result};
     use std::os::unix::io::AsRawFd;
     use std::path::Path;
+    use std::fs::OpenOptions;
 
     pub struct RollLockEx {
         _lock_file: File,
@@ -265,75 +268,11 @@ mod imp {
             let mut lock_path = PathBuf::new();
             lock_path.push(log_dir.unwrap_or(Path::new("/tmp")));
             lock_path.push("roll.lock");
-            let lock_file = File::create(&lock_path)?;
-            let ret = unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-            if ret < 0 {
-                Err(Error::last_os_error())
-            } else {
-                Ok(RollLockEx { _lock_file: lock_file, lock_path })
-            }
-        }
-    }
-
-    impl Drop for RollLockEx {
-        fn drop(&mut self) {
-            remove_file(&self.lock_path).ok();
-        }
-    }
-}
-
-#[cfg(target_os = "solaris")]
-mod imp {
-    use std::fs::File;
-    use std::fs::remove_file;
-    use std::path::PathBuf;
-    use std::io::{Error, Result};
-    use std::os::unix::io::AsRawFd;
-    use std::path::Path;
-
-    pub struct RollLockEx {
-        _lock_file: File,
-        lock_path: PathBuf,
-    }
-
-    impl RollLockEx {
-        pub fn new(log_dir: Option<&Path>) -> Result<RollLockEx> {
-            let mut lock_path = PathBuf::new();
-            lock_path.push(log_dir.unwrap_or(Path::new("/tmp")));
-            lock_path.push("roll.lock");
-            let lock_file = File::create(&lock_path)?;
-            let flag = libc::LOCK_EX | libc::LOCK_NB;
-
-            let mut fl = libc::flock {
-                l_whence: 0,
-                l_start: 0,
-                l_len: 0,
-                l_type: 0,
-                l_pad: [0; 4],
-                l_pid: 0,
-                l_sysid: 0,
-            };
-
-            let (cmd, operation) = match flag & libc::LOCK_NB {
-                0 => (libc::F_SETLKW, flag),
-                _ => (libc::F_SETLK, flag & !libc::LOCK_NB),
-            };
-
-            match operation {
-                libc::LOCK_SH => fl.l_type |= libc::F_RDLCK,
-                libc::LOCK_EX => fl.l_type |= libc::F_WRLCK,
-                libc::LOCK_UN => fl.l_type |= libc::F_UNLCK,
-                _ => return Err(Error::from_raw_os_error(libc::EINVAL)),
-            }
-
-            let ret = unsafe { libc::fcntl(lock_file.as_raw_fd(), cmd, &fl) };
-            match ret {
-                -1 => match Error::last_os_error().raw_os_error() {
-                    Some(libc::EACCES) => return Err(Error::from_raw_os_error(libc::EWOULDBLOCK)),
-                    _ => return Err(Error::last_os_error())
-                },
-                _ => Ok(RollLockEx { _lock_file: lock_file, lock_path })
-            }
+            let lock_file = OpenOptions::new().write(true)
+                .create_new(true)
+                .open(&lock_path)?;
+            //eprintln!("I got the roll lock!  {}", ::std::process::id());
+            Ok(RollLockEx { _lock_file: lock_file, lock_path })
         }
     }
 
